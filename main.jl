@@ -1,24 +1,28 @@
-using DataFrames
-using CSV
-using GLM
-using CategoricalArrays
 using StatsKit
-ENV["DATAFRAMES_ROWS"] = 6
 
 function processData(data::DataFrame)::DataFrame
     data = select(data, Not([:PassengerId, :Name]))
     data.RoomDeck = categorical([String(deck[1]) for deck in split.(data.Cabin, "/")])
-    data.RoomNum = categorical([String(deck[2]) for deck in split.(data.Cabin, "/")])
+    data.RoomNum = [String(deck[2]) for deck in split.(data.Cabin, "/")]
     data.RoomSide = categorical([String(deck[3]) for deck in split.(data.Cabin, "/")])
     data.TotalSpent = data.RoomService + data.FoodCourt + data.ShoppingMall + data.Spa + data.VRDeck
     data = select(data, Not(:Cabin))
-    data = transform(data, names(data, AbstractString) .=> categorical, renamecols=false)
+    data = DataFrames.transform(data, names(data, Multiclass) .=> coerce, renamecols=false)
 
     return data
 end
 
+data = CSV.read("data/train.csv", DataFrame) |> 
+    dropmissing |> 
+    processData
+
+
+###Stats Model
+fn = @formula(Transported ~ HomePlanet + CryoSleep)
+logitModel = glm(fn, data, Bernoulli(), LogitLink())
+
 function measureAccuracy(model, data::DataFrame)::Float64
-    predictions = predict(model, processData(data))
+    predictions = GLM.predict(model, data)
     predictions = [
         if x < 0.5
             false
@@ -34,9 +38,4 @@ function measureAccuracy(model, data::DataFrame)::Float64
 
 end
 
-data = CSV.read("data/train.csv", DataFrame) |> dropmissing
-
-fn = @formula(Transported ~ HomePlanet + CryoSleep)
-logitModel = glm(fn, processData(data), Bernoulli(), LogitLink())
-
-measureAccuracy(logitModel, data)
+acc = measureAccuracy(logitModel, data)
