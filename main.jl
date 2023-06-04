@@ -1,28 +1,37 @@
 using StatsKit
+using MLJ
+import MLJLinearModels
+using AlgebraOfGraphics, CairoMakie
+set_aog_theme!()
 
-function processData(data::DataFrame)::DataFrame
-    data = select(data, Not([:PassengerId, :Name]))
-    data.RoomDeck = categorical([String(deck[1]) for deck in split.(data.Cabin, "/")])
-    data.RoomNum = [String(deck[2]) for deck in split.(data.Cabin, "/")]
-    data.RoomSide = categorical([String(deck[3]) for deck in split.(data.Cabin, "/")])
-    data.TotalSpent = data.RoomService + data.FoodCourt + data.ShoppingMall + data.Spa + data.VRDeck
-    data = select(data, Not(:Cabin))
-    data = DataFrames.transform(data, names(data, Multiclass) .=> coerce, renamecols=false)
 
-    return data
+function processpassengerData(passengerData::DataFrame)::DataFrame
+    passengerData = select(passengerData, Not([:PassengerId, :Name]))
+    passengerData.RoomDeck = categorical([String(deck[1]) for deck in split.(passengerData.Cabin, "/")])
+    #passengerData.RoomNum = [String(deck[2]) for deck in split.(passengerData.Cabin, "/")]
+    passengerData.RoomSide = categorical([String(deck[3]) for deck in split.(passengerData.Cabin, "/")])
+    #passengerData.TotalSpent = passengerData.RoomService + passengerData.FoodCourt + passengerData.ShoppingMall + passengerData.Spa + passengerData.VRDeck
+    passengerData = select(passengerData, Not(:Cabin))
+    return passengerData
 end
 
-data = CSV.read("data/train.csv", DataFrame) |> 
-    dropmissing |> 
-    processData
+passengerData = CSV.read("data/train.csv", DataFrame) |>
+                dropmissing |>
+                processpassengerData
 
 
-###Stats Model
-fn = @formula(Transported ~ HomePlanet + CryoSleep)
-logitModel = glm(fn, data, Bernoulli(), LogitLink())
+###Data Analysis
+axis = (width=225, height=225)
+transported_deck = AlgebraOfGraphics.data(passengerData) * frequency() * mapping(:Transported, color=:VIP)
 
-function measureAccuracy(model, data::DataFrame)::Float64
-    predictions = GLM.predict(model, data)
+
+
+###Statistical Approach
+fn = @formula(Transported ~ VIP + CryoSleep + Age + RoomService)
+logitModel = glm(fn, passengerData, Bernoulli(), LogitLink())
+
+function measureAccuracy(model, passengerData::DataFrame)::Float64
+    predictions = GLM.predict(model, passengerData)
     predictions = [
         if x < 0.5
             false
@@ -30,7 +39,7 @@ function measureAccuracy(model, data::DataFrame)::Float64
             true
         end for x in predictions
     ]
-    prediction_df = DataFrame(y_actual=data.Transported, y_predicted=predictions, prob_predicted=predictions)
+    prediction_df = DataFrame(y_actual=passengerData.Transported, y_predicted=predictions, prob_predicted=predictions)
     prediction_df.correctly_classified = prediction_df.y_actual .== prediction_df.y_predicted
     accuracy = mean(prediction_df.correctly_classified)
 
@@ -38,4 +47,17 @@ function measureAccuracy(model, data::DataFrame)::Float64
 
 end
 
-acc = measureAccuracy(logitModel, data)
+acc = measureAccuracy(logitModel, passengerData)
+
+
+###Machine Learning Approach
+scipassengerData = MLJ.coerce!(passengerData,
+    MLJ.autotype(passengerData)
+)
+
+y, X = MLJ.unpack(scipassengerData, ==(:Transported); rng=123)
+logi = MLJLinearModels.LogisticClassifier()
+logi = MLJ.machine(logi, X, y)
+train, test = MLJ.partition(eachindex(y), 0.7)
+
+fit!(logi, rows=train)
